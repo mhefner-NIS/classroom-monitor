@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Classroom Behavior Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/pose.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.1/camera_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.4/drawing_utils.js"></script>
+  <style>
+    body { display:flex; flex-direction:column; align-items:center; }
+    canvas, video { display:none; }
+    #output { width:640px; height:480px; border:1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h3>Classroom Monitor</h3>
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="output"></canvas>
+
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('output');
+    const ctx = canvas.getContext('2d');
+    let lastMove = Date.now(), noMoveAlerted=false;
+    const NO_MOVE_MS = 5*60*1000;      // 5 min
+    let prevFrame = null;
+
+    function onResults(results) {
+      // draw frame
+      ctx.save();
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.drawImage(results.image,0,0,canvas.width,canvas.height);
+
+      // motion detection
+      const curr = ctx.getImageData(0,0,canvas.width,canvas.height);
+      if (prevFrame) {
+        let diff=0;
+        for (let i=0;i<curr.data.length;i+=4) diff += Math.abs(curr.data[i]-prevFrame.data[i]);
+        if (diff>1000000) {
+          lastMove=Date.now(); noMoveAlerted=false;
+        } else if (!noMoveAlerted && Date.now()-lastMove>NO_MOVE_MS) {
+          alert('⚠️ No student movement for 5 minutes!');
+          noMoveAlerted = true;
+        }
+      }
+      prevFrame = curr;
+
+      // pose / hand-raise
+      if (results.poseLandmarks) {
+        const lm = results.poseLandmarks;
+        const noseY = lm[0].y, lw = lm[15].y, rw = lm[16].y;
+        if (lw < noseY-0.05 || rw < noseY-0.05) {
+          alert('✋ A hand was raised!');
+        }
+        // draw skeleton
+        window.drawConnectors(ctx, lm, window.POSE_CONNECTIONS);
+        window.drawLandmarks(ctx, lm);
+      }
+      ctx.restore();
+    }
+
+    const pose = new Pose({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5/${f}`});
+    pose.setOptions({
+      modelComplexity: 0,
+      smoothLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5
+    });
+    pose.onResults(onResults);
+
+    const camera = new Camera(video, {
+      onFrame: async () => await pose.send({image: video}),
+      width: 640, height: 480
+    });
+    camera.start();
+  </script>
+</body>
+</html>
